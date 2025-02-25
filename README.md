@@ -421,6 +421,178 @@ ns02.dns.lab.           3600    IN      A       192.168.57.11
  - client2 видит только всю зону dns.lab (web1 и web2).      
 Все проверки успешно пройдены    
 
+### 6. Настройка BIND с включенным SELinux    
+
+На всех машинах включил SELinux
+
+```shell
+sudo setenforce 1
+```    
+
+#### 6.1. Настройка контекстов SELinux для BIND    
+Проверил контексты файлов зон    
+```shell
+[root@ns01 ~]# ls -Z /etc/named/named.dns.lab
+-rw-rw----. root named system_u:object_r:etc_t:s0       /etc/named/named.dns.lab
+
+[root@ns01 ~]# ls -Z /etc/named/named.newdns.lab
+-rw-rw----. root named system_u:object_r:etc_t:s0       /etc/named/named.newdns.lab
+```     
+
+#### 6.2. Исправил контексты
+```shell
+[root@ns01 ~]# chcon -t named_zone_t /etc/named/named.newdns.lab
+[root@ns01 ~]# chcon -t named_zone_t /etc/named/named.dns.lab
+[root@ns01 ~]# chcon -t named_conf_t /etc/named.conf
+[root@ns01 ~]# restorecon -Rv /etc/named
+restorecon reset /etc/named/named.dns.lab context system_u:object_r:named_zone_t:s0->system_u:object_r:etc_t:s0
+restorecon reset /etc/named/named.newdns.lab context system_u:object_r:named_zone_t:s0->system_u:object_r:etc_t:s0
+```    
+
+Перезапустил службу named   
+```shell
+[root@ns01 ~]# systemctl restart named
+[root@ns01 ~]# systemctl status named
+● named.service - Berkeley Internet Name Domain (DNS)
+   Loaded: loaded (/usr/lib/systemd/system/named.service; enabled; vendor preset: disabled)
+   Active: active (running) since Tue 2025-02-25 20:29:18 UTC; 10s ago
+  Process: 24263 ExecStop=/bin/sh -c /usr/sbin/rndc stop > /dev/null 2>&1 || /bin/kill -TERM $MAINPID (code=exited, status=0/SUCCESS
+)
+  Process: 24277 ExecStart=/usr/sbin/named -u named -c ${NAMEDCONF} $OPTIONS (code=exited, status=0/SUCCESS)
+  Process: 24275 ExecStartPre=/bin/bash -c if [ ! "$DISABLE_ZONE_CHECKING" == "yes" ]; then /usr/sbin/named-checkconf -z "$NAMEDCONF
+"; else echo "Checking of zone files is disabled"; fi (code=exited, status=0/SUCCESS)
+ Main PID: 24279 (named)
+   CGroup: /system.slice/named.service
+           └─24279 /usr/sbin/named -u named -c /etc/named.conf
+
+Feb 25 20:29:18 ns01 named[24279]: running
+Feb 25 20:29:18 ns01 systemd[1]: Started Berkeley Internet Name Domain (DNS).
+Feb 25 20:29:18 ns01 named[24279]: zone dns.lab/IN/client1: sending notifies (serial 2507202401)
+Feb 25 20:29:18 ns01 named[24279]: zone newdns.lab/IN/client1: sending notifies (serial 2507202401)
+Feb 25 20:29:18 ns01 named[24279]: zone dns.lab/IN/client2: sending notifies (serial 2507202401)
+Feb 25 20:29:18 ns01 named[24279]: zone newdns.lab/IN/default: sending notifies (serial 2507202401)
+Feb 25 20:29:18 ns01 named[24279]: zone 57.168.192.in-addr.arpa/IN/default: sending notifies (serial 2507202401)
+Feb 25 20:29:18 ns01 named[24279]: zone dns.lab/IN/default: sending notifies (serial 2507202401)
+Feb 25 20:29:28 ns01 named[24279]: resolver priming query complete
+Feb 25 20:29:28 ns01 named[24279]: managed-keys-zone/default: Unable to fetch DNSKEY set '.': timed out
+```    
+
+#### 6.3. Проверил    
+
+*client1*   
+```shell
+[root@client1 ~]# dig web1.dns.lab
+
+; <<>> DiG 9.11.4-P2-RedHat-9.11.4-26.P2.el7_9.16 <<>> web1.dns.lab
+;; global options: +cmd
+;; Got answer:
+;; ->>HEADER<<- opcode: QUERY, status: NOERROR, id: 42504
+;; flags: qr aa rd ra; QUERY: 1, ANSWER: 1, AUTHORITY: 2, ADDITIONAL: 3
+
+;; OPT PSEUDOSECTION:
+; EDNS: version: 0, flags:; udp: 4096
+;; QUESTION SECTION:
+;web1.dns.lab.                  IN      A
+
+;; ANSWER SECTION:
+web1.dns.lab.           3600    IN      A       192.168.57.15       #<---------ответ
+
+;; AUTHORITY SECTION:
+dns.lab.                3600    IN      NS      ns02.dns.lab.
+dns.lab.                3600    IN      NS      ns01.dns.lab.
+
+;; ADDITIONAL SECTION:
+ns01.dns.lab.           3600    IN      A       192.168.57.10
+ns02.dns.lab.           3600    IN      A       192.168.57.11
+
+;; Query time: 0 msec
+;; SERVER: 192.168.57.10#53(192.168.57.10)
+;; WHEN: Tue Feb 25 20:29:57 UTC 2025
+;; MSG SIZE  rcvd: 127
+------------------------------------------------------------------------
+[root@client1 ~]# dig www.newdns.lab
+
+; <<>> DiG 9.11.4-P2-RedHat-9.11.4-26.P2.el7_9.16 <<>> www.newdns.lab
+;; global options: +cmd
+;; Got answer:
+;; ->>HEADER<<- opcode: QUERY, status: NOERROR, id: 30292
+;; flags: qr aa rd ra; QUERY: 1, ANSWER: 2, AUTHORITY: 2, ADDITIONAL: 3
+
+;; OPT PSEUDOSECTION:
+; EDNS: version: 0, flags:; udp: 4096
+;; QUESTION SECTION:
+;www.newdns.lab.                        IN      A
+
+;; ANSWER SECTION:
+www.newdns.lab.         3600    IN      A       192.168.57.16        #<---------ответ
+www.newdns.lab.         3600    IN      A       192.168.57.15        #<---------ответ
+
+;; AUTHORITY SECTION:
+newdns.lab.             3600    IN      NS      ns01.dns.lab.
+newdns.lab.             3600    IN      NS      ns02.dns.lab.
+
+;; ADDITIONAL SECTION:
+ns01.dns.lab.           3600    IN      A       192.168.57.10
+ns02.dns.lab.           3600    IN      A       192.168.57.11
+
+;; Query time: 0 msec
+;; SERVER: 192.168.57.10#53(192.168.57.10)
+;; WHEN: Tue Feb 25 20:31:54 UTC 2025
+;; MSG SIZE  rcvd: 149
+```    
+*client2*   
+```shell
+[root@client2 ~]# dig web2.dns.lab
+
+; <<>> DiG 9.11.4-P2-RedHat-9.11.4-26.P2.el7_9.16 <<>> web2.dns.lab
+;; global options: +cmd
+;; Got answer:
+;; ->>HEADER<<- opcode: QUERY, status: NOERROR, id: 37730
+;; flags: qr aa rd ra; QUERY: 1, ANSWER: 1, AUTHORITY: 2, ADDITIONAL: 3
+
+;; OPT PSEUDOSECTION:
+; EDNS: version: 0, flags:; udp: 4096
+;; QUESTION SECTION:
+;web2.dns.lab.                  IN      A
+
+;; ANSWER SECTION:
+web2.dns.lab.           3600    IN      A       192.168.57.16         #<---------ответ
+
+;; AUTHORITY SECTION:
+dns.lab.                3600    IN      NS      ns02.dns.lab.
+dns.lab.                3600    IN      NS      ns01.dns.lab.
+
+;; ADDITIONAL SECTION:
+ns01.dns.lab.           3600    IN      A       192.168.57.10
+ns02.dns.lab.           3600    IN      A       192.168.57.11
+
+;; Query time: 0 msec
+;; SERVER: 192.168.57.10#53(192.168.57.10)
+;; WHEN: Tue Feb 25 20:33:15 UTC 2025
+;; MSG SIZE  rcvd: 127
+--------------------------------------------------------------------
+[root@client2 ~]# dig www.newdns.lab
+
+; <<>> DiG 9.11.4-P2-RedHat-9.11.4-26.P2.el7_9.16 <<>> www.newdns.lab
+;; global options: +cmd
+;; Got answer:
+;; ->>HEADER<<- opcode: QUERY, status: NXDOMAIN, id: 41513            #<--------------------ошибка
+;; flags: qr rd ra; QUERY: 1, ANSWER: 0, AUTHORITY: 1, ADDITIONAL: 1
+
+;; OPT PSEUDOSECTION:
+; EDNS: version: 0, flags:; udp: 4096
+;; QUESTION SECTION:
+;www.newdns.lab.                        IN      A
+
+;; AUTHORITY SECTION:
+.                       10800   IN      SOA     a.root-servers.net. nstld.verisign-grs.com. 2025022501 1800 900 604800 86400
+
+;; Query time: 933 msec
+;; SERVER: 192.168.57.10#53(192.168.57.10)
+;; WHEN: Tue Feb 25 20:33:02 UTC 2025
+;; MSG SIZE  rcvd: 118
+```   
+
 __________________   
 
 end
