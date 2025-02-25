@@ -79,7 +79,7 @@ Split DNS (split-horizon или split-brain) — это конфигурация
 |Client1|192.168.57.15|
 |Client2|192.168.57.16|    
 
-### 2. Запустил playbook dns.yml    
+### 2. Создал и запустил playbook dns.yml    
 
 ```shell
 root@ansible:/home/vagrant/ansible# ansible-playbook dns.yml
